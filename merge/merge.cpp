@@ -28,7 +28,7 @@ struct SpkdUnit {
 	int speakerId;
 };
 
-struct MeetingResult {
+struct MeetingUnit {
 	std::string waveId;
 	float startTime;
 	float endTime;
@@ -68,19 +68,23 @@ int readSpkdList(const char* filename, std::vector<SpkdUnit> *spkdUnit) {
 	return 0;
 }
 
-int smoothMeetingResult(std::vector<TextUnit> *textList, std::vector<SpkdUnit> *spkdList , std::vector<MeetingResult> *meetingList) {
+int mergeAsrSpkdMeetingResult(std::vector<TextUnit> *textList, std::vector<SpkdUnit> *spkdList , std::vector<MeetingUnit> *meetingList) {
+	int speakerNum = 0;
 	//compute durTime or end time
 	for (int i = 0; i < textList->size(); i++) {
 		(*textList)[i].durTime = (*textList)[i].endTime - (*textList)[i].startTime;
 	}
 	for (int i = 0; i < spkdList->size(); i++) {
 		(*spkdList)[i].endTime = (*spkdList)[i].startTime + (*spkdList)[i].durTime;
+		if ((*spkdList)[i].speakerId > speakerNum) {
+			speakerNum = (*spkdList)[i].speakerId;
+		}
 	}
 
 	//method 1 asr 开始的时间点 为spkID
 	for (int i = 0; i < textList->size(); i++) {
 		TextUnit textUnit = (*textList)[i];
-		MeetingResult meetingResult;
+		MeetingUnit meetingResult;
 		meetingResult.waveId = textUnit.waveId;
 		meetingResult.startTime = textUnit.startTime;
 		meetingResult.endTime = textUnit.endTime;
@@ -90,72 +94,109 @@ int smoothMeetingResult(std::vector<TextUnit> *textList, std::vector<SpkdUnit> *
 	}
 
 	for (int i = 0; i < meetingList->size(); i++) {
-		MeetingResult &meetingResult=(*meetingList)[i];
+		MeetingUnit &meetingResult=(*meetingList)[i];
 		//compute spkId
 		//TODO ADD SOME RULE
 		float startTimeInText = meetingResult.startTime;
 		float endTimeInText = meetingResult.endTime;
 
+		std::vector<float>speakerStatSum(speakerNum, 0.0);
+
 		for (int j = 0; j<spkdList->size(); j++) {
 			SpkdUnit spkdUnit = (*spkdList)[j];
-			//给第1段赋初值
-			if (endTimeInText<(*spkdList)[0].startTime) {
-				meetingResult.speakerId = (*spkdList)[0].speakerId;
-				break;
+
+			if (spkdUnit.startTime > startTimeInText && spkdUnit.endTime < endTimeInText) {
+				speakerStatSum[spkdUnit.speakerId - 1] += spkdUnit.endTime - spkdUnit.startTime;
 			}
 
-			if (startTimeInText < spkdUnit.endTime && endTimeInText > spkdUnit.startTime) {
-					meetingResult.speakerId = spkdUnit.speakerId;
-					break;
-				}
+			if (spkdUnit.startTime < startTimeInText && spkdUnit.endTime > endTimeInText) {
+				speakerStatSum[spkdUnit.speakerId - 1] += endTimeInText- startTimeInText;
+			}
 
-			//if (startTimeInText <= spkdUnit.endTime && endTimeInText > spkdUnit.startTime)//按照结束时间算，因为spkd时间未覆盖全
-			//	meetingResult.speakerId = spkdUnit.speakerId;
+			if (spkdUnit.startTime < startTimeInText && spkdUnit.endTime > startTimeInText && spkdUnit.endTime <endTimeInText) {
+				speakerStatSum[spkdUnit.speakerId - 1] += spkdUnit.endTime - startTimeInText;
+			}
+
+			if (spkdUnit.startTime > startTimeInText && spkdUnit.endTime > endTimeInText && spkdUnit.startTime <endTimeInText) {
+				speakerStatSum[spkdUnit.speakerId - 1] += endTimeInText-spkdUnit.startTime;
+			}
+		}
+
+		float maxDurTime = 0.0;
+		int maxDurSpeakerId = 0;
+		for (int k = 0; k < speakerStatSum.size(); k++) {
+			if (maxDurTime < speakerStatSum[k]) {
+				maxDurTime = speakerStatSum[k];
+				maxDurSpeakerId = k+1;
+			}
+			
+		}
+		meetingResult.speakerId = maxDurSpeakerId;
+	}
+
+	return 0;
+}
+
+int outputMeetingResult(std::vector<MeetingUnit> *meetingList, const char* filename) {
+	setlocale(LC_ALL, "chs");
+	std::ofstream of(filename);
+	of.setf(std::ios::fixed, std::ios::floatfield);
+	of.precision(2);
+	of << "语音文件名 开始时间 结束时间 说话人ID 说话内容文本" << '\n';
+	for (int i = 0; i < meetingList->size(); i++){
+		MeetingUnit meetingResult = (*meetingList)[i];
+	/*	std::string sen = meetingResult.sentence;*/
+		of << meetingResult.waveId << " "<< meetingResult.startTime<<" "<< meetingResult.endTime<< " " \
+			<< meetingResult.speakerId<< " " << meetingResult.sentence<<"\n";
+	}
+	of.close();
+	return 0;
+}
+
+int AddPuncMeetingResult(std::vector<MeetingUnit> *meetingList) {
+
+	for (int i = 0; i < meetingList->size(); i++) {
+		std::string &sentence = (*meetingList)[i].sentence;
+
+		std::string ask1 = "吗";
+		std::string ask2 = "呢";
+
+		std::string sigh1 = "啊";
+		std::string sigh2 = "吧";
+		std::string sigh3 = "呀";
+
+		std::string temp = sentence.substr(sentence.size() - 2, sentence.size() - 1);
+		if (temp == ask1 || temp ==ask2) {
+			sentence += "？";
+		}
+		else if (temp == sigh1 || temp==sigh2 | temp==sigh3 ) {
+			sentence += "！";
+		}
+		else {
+			//sentence += "。";
 		}
 
 
 	}
-
 	return 0;
 }
-
-int outputMeetingResult(std::vector<MeetingResult> *meetingList, const char* filename) {
-	setlocale(LC_ALL, "chs");
-	//FILE *f_res = fopen(filename, "w");
-	//std::locale &loc = std::locale::global(std::locale(std::locale(), "", LC_CTYPE));
-	//std::locale::global(loc);
-	std::ofstream of(filename);
-	for (int i = 0; i < meetingList->size(); i++){
-		MeetingResult meetingResult = (*meetingList)[i];
-		std::string sen = meetingResult.sentence;
-		of << sen;
-		//fprintf(f_res, "%s %.2f %.2f  %d ", meetingResult.waveId.c_str() , meetingResult.startTime, meetingResult.endTime,  meetingResult.speakerId);
-		//std::wstring wtemp;
-		//std::wstring_convert< std::codecvt_utf8<wchar_t> > strCnv;
-		//	wtemp = strCnv.from_bytes(meetingResult.sentence);
-	    //std::wcout << wtemp << std::endl;
-		//fwprintf(f_res, L"%s\n", wtemp.c_str() );
-		//fwprintf(f_res, L"%s \n",  meetingResult.sentence.c_str());
-	}
-	of.close();
-	//fclose(f_res);
-	return 0;
-}
-
-
 int main()
 {
 
 	std::vector<TextUnit> textResult; 
 	std::vector<SpkdUnit> spkdResult;
-	std::vector<MeetingResult> meetingResult;
+	std::vector<MeetingUnit> meetingResult;
 	readTextList("../res/talk3_8k.text", &textResult);
 	readSpkdList("../res/talk3_8k.spkd", &spkdResult);
 
 
-	smoothMeetingResult(&textResult,&spkdResult,&meetingResult);
+	mergeAsrSpkdMeetingResult(&textResult,&spkdResult,&meetingResult);
 
-	outputMeetingResult(&meetingResult,"../res/talk_8k.meetingResult");
+	AddPuncMeetingResult(&meetingResult);
+
+	outputMeetingResult(&meetingResult,"../res/talk_8k.meeting");
+
+
 
 
     return 0;
