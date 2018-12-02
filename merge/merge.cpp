@@ -32,12 +32,18 @@ struct MeetingUnit {
 	std::string waveId;
 	float startTime;
 	float endTime;
+	std::vector<float> sumProb;
 
 	int speakerId;
 	std::string sentence;
 	
 };
 
+struct SpkdFrameUnit{
+	std::string waveId;
+	int frameId;
+	std::vector<float> personProb;
+};
 
 int readTextList(const char* filename, std::vector<TextUnit> *wordSymbol) {
 
@@ -67,6 +73,26 @@ int readSpkdList(const char* filename, std::vector<SpkdUnit> *spkdUnit) {
 
 	return 0;
 }
+
+int readSpkdFrameList(const char* filename, std::vector<SpkdFrameUnit> *spkdFrameUnit) {
+	std::string lineStr;
+	std::ifstream SpkdFile(filename);
+
+	while (std::getline(SpkdFile, lineStr)) {
+		SpkdFrameUnit lineUnit;
+		std::istringstream sin(lineStr);
+		sin >> lineUnit.waveId >> lineUnit.frameId;
+		float prob = 0.0;
+		while (sin >> prob) {
+			lineUnit.personProb.push_back(prob);
+		}
+		spkdFrameUnit->emplace_back(lineUnit);
+	}
+
+	return 0;
+}
+
+
 
 int mergeAsrSpkdMeetingResult(std::vector<TextUnit> *textList, std::vector<SpkdUnit> *spkdList , std::vector<MeetingUnit> *meetingList) {
 	int speakerNum = 0;
@@ -137,6 +163,81 @@ int mergeAsrSpkdMeetingResult(std::vector<TextUnit> *textList, std::vector<SpkdU
 	return 0;
 }
 
+
+
+int mergeAsrSpkdFrameMeetingResult(std::vector<TextUnit> *textList, std::vector<SpkdFrameUnit> *spkdFrameList, std::vector<MeetingUnit> *meetingList) {
+	if (spkdFrameList->size() < 1) {
+		return -1;
+	}
+
+	int speakerNum = (*spkdFrameList)[0].personProb.size();
+
+	//compute durTime or end time
+	for (int i = 0; i < textList->size(); i++) {
+		(*textList)[i].durTime = (*textList)[i].endTime - (*textList)[i].startTime;
+	}
+
+	//method 1 asr 开始的时间点 为spkID
+	for (int i = 0; i < textList->size(); i++) {
+		TextUnit textUnit = (*textList)[i];
+		MeetingUnit meetingResult;
+		meetingResult.waveId = textUnit.waveId;
+		meetingResult.startTime = textUnit.startTime;
+		meetingResult.endTime = textUnit.endTime;
+		meetingResult.sentence = textUnit.sentence;
+		meetingResult.speakerId = 0;
+		meetingList->emplace_back(meetingResult);
+	}
+
+	std::vector<std::vector<float>> debug;
+
+	for (int i = 0; i < meetingList->size(); i++) {
+		//累加每个用户的概率
+		MeetingUnit &meetingResult = (*meetingList)[i];
+		float startTime = meetingResult.startTime;
+		float endTime = meetingResult.endTime;
+
+		int startFrame = startTime / 0.01 ;
+		int endFrame = endTime / 0.01;
+
+		//check spkdFrame size
+		if (endFrame > spkdFrameList->size()) {
+			printf("something wrong\n");
+			return -1;
+		}
+
+		//init sumProb
+		std::vector<float> &sumProb = meetingResult.sumProb;
+		sumProb.resize(speakerNum);
+		for (int k = 0; k < sumProb.size(); k++) {
+			sumProb[k] = 0.0;
+		}
+
+
+		for (int j = startFrame; j < endFrame; j++) {
+			for (int k = 0; k < sumProb.size(); k++) {
+				sumProb[k] += ((*spkdFrameList)[j]).personProb[k];
+			}
+		}
+
+		float maxProb = 0;
+		int max_speaker = -1;
+		for (int k = 0; k < sumProb.size(); k++) {
+			if (maxProb < sumProb[k]) {
+				max_speaker = k + 1;//speake frome 1 
+				maxProb = sumProb[k];
+			}
+
+		}
+		meetingResult.speakerId = max_speaker;
+
+	}
+
+
+
+	return 0;
+}
+
 int outputMeetingResult(std::vector<MeetingUnit> *meetingList, const char* filename) {
 	setlocale(LC_ALL, "chs");
 	std::ofstream of(filename);
@@ -189,12 +290,19 @@ int main()
 	readTextList("../res/talk3_8k.text", &textResult);
 	readSpkdList("../res/talk3_8k.spkd", &spkdResult);
 
+	std::vector<SpkdFrameUnit> spkdFrameResult;
+	readSpkdFrameList("../res/talk3_8k.post", &spkdFrameResult);
 
-	mergeAsrSpkdMeetingResult(&textResult,&spkdResult,&meetingResult);
 
+
+
+
+	//mergeAsrSpkdMeetingResult(&textResult,&spkdResult,&meetingResult);
+
+	mergeAsrSpkdFrameMeetingResult(&textResult, &spkdFrameResult, &meetingResult);
 	AddPuncMeetingResult(&meetingResult);
 
-	outputMeetingResult(&meetingResult,"../res/talk_8k.meeting");
+	outputMeetingResult(&meetingResult,"../res/talk3_8k.meetingFrame");
 
 
 
