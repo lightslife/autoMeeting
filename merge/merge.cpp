@@ -10,7 +10,7 @@
 #include <string>
 #include <sstream>
 #include <locale>
-
+#include "wave.h"
 struct TextUnit {
 	std::string waveId;
 	float startTime;
@@ -299,11 +299,11 @@ int main()
 	std::vector<TextUnit> textResult; 
 	std::vector<SpkdUnit> spkdResult;
 	std::vector<MeetingUnit> meetingResult;
-	readTextList("../res/talk3_8k.text", &textResult);
-	readSpkdList("../res/talk3_8k.spkd", &spkdResult);
+	readTextList("../res/talk3_8k_random.text", &textResult);
+	readSpkdList("../res/talk3_8k_random.spkd", &spkdResult);
 
 	std::vector<SpkdFrameUnit> spkdFrameResult;
-	readSpkdFrameList("../res/talk3_8k.post", &spkdFrameResult);
+	readSpkdFrameList("../res/talk3_8k_random.post", &spkdFrameResult);
 
 
 
@@ -314,7 +314,29 @@ int main()
 	mergeAsrSpkdFrameMeetingResult(&textResult, &spkdFrameResult, &meetingResult);
 	AddPuncMeetingResult(&meetingResult);
 
-	outputMeetingResult(&meetingResult,"../res/talk3_8k.meetingFrame");
+	outputMeetingResult(&meetingResult,"../res/talk3_8k_random.meetingFrame");
+
+
+
+
+	Wave ori_wav;
+	ori_wav.readWave("../res/talk3_8k_random.wav");
+	for (int i = 0; i < meetingResult.size(); i++) {
+		float startTime = meetingResult[i].startTime;
+		float endTime = meetingResult[i].endTime;
+		std::string name = "../out_wav/talk3_speaker" + std::to_string(meetingResult[i].speakerId) +"_"+ std::to_string(meetingResult[i].startTime) + "_" + std::to_string(meetingResult[i].endTime) + "_" + std::to_string(meetingResult[i].durTime) + "_" + std::to_string(meetingResult[i].validaFrame) ;
+		for (int j = 0; j < meetingResult[j].sumProb.size(); j++) {
+			name += "_"+std::to_string(meetingResult[i].sumProb[j]/ meetingResult[i].validaFrame);
+		}
+		name += ".wav";
+
+		ori_wav.writeWaveSplit(startTime,endTime,name.c_str());
+
+
+	}
+
+
+
 
 
 
