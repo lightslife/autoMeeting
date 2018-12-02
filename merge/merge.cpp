@@ -32,8 +32,9 @@ struct MeetingUnit {
 	std::string waveId;
 	float startTime;
 	float endTime;
+	float durTime;
 	std::vector<float> sumProb;
-
+	int validaFrame;
 	int speakerId;
 	std::string sentence;
 	
@@ -42,6 +43,7 @@ struct MeetingUnit {
 struct SpkdFrameUnit{
 	std::string waveId;
 	int frameId;
+	int valid_frame;
 	std::vector<float> personProb;
 };
 
@@ -80,10 +82,14 @@ int readSpkdFrameList(const char* filename, std::vector<SpkdFrameUnit> *spkdFram
 
 	while (std::getline(SpkdFile, lineStr)) {
 		SpkdFrameUnit lineUnit;
+		lineUnit.valid_frame = 0;
 		std::istringstream sin(lineStr);
-		sin >> lineUnit.waveId >> lineUnit.frameId;
+		sin /*>> lineUnit.waveId*/ >> lineUnit.frameId;
 		float prob = 0.0;
 		while (sin >> prob) {
+			if (prob != 0.0)
+				lineUnit.valid_frame=1;
+
 			lineUnit.personProb.push_back(prob);
 		}
 		spkdFrameUnit->emplace_back(lineUnit);
@@ -185,11 +191,12 @@ int mergeAsrSpkdFrameMeetingResult(std::vector<TextUnit> *textList, std::vector<
 		meetingResult.startTime = textUnit.startTime;
 		meetingResult.endTime = textUnit.endTime;
 		meetingResult.sentence = textUnit.sentence;
+		meetingResult.durTime = textUnit.endTime - textUnit.startTime;
+
 		meetingResult.speakerId = 0;
+		meetingResult.validaFrame = 0;
 		meetingList->emplace_back(meetingResult);
 	}
-
-	std::vector<std::vector<float>> debug;
 
 	for (int i = 0; i < meetingList->size(); i++) {
 		//累加每个用户的概率
@@ -215,6 +222,7 @@ int mergeAsrSpkdFrameMeetingResult(std::vector<TextUnit> *textList, std::vector<
 
 
 		for (int j = startFrame; j < endFrame; j++) {
+			meetingResult.validaFrame += ((*spkdFrameList)[j]).valid_frame;
 			for (int k = 0; k < sumProb.size(); k++) {
 				sumProb[k] += ((*spkdFrameList)[j]).personProb[k];
 			}
@@ -247,8 +255,12 @@ int outputMeetingResult(std::vector<MeetingUnit> *meetingList, const char* filen
 	for (int i = 0; i < meetingList->size(); i++){
 		MeetingUnit meetingResult = (*meetingList)[i];
 	/*	std::string sen = meetingResult.sentence;*/
-		of << meetingResult.waveId << " "<< meetingResult.startTime<<" "<< meetingResult.endTime<< " " \
-			<< meetingResult.speakerId<< " " << meetingResult.sentence<<"\n";
+		of << meetingResult.waveId << " " << meetingResult.startTime << " " << meetingResult.endTime << "    "<< meetingResult.durTime<<" "<<meetingResult.validaFrame<< " ";
+		for (int i = 0; i < meetingResult.sumProb.size(); i++) {
+			of <<"\t"<<meetingResult.sumProb[i]/meetingResult.validaFrame << " \t";
+		}
+			
+			of<< meetingResult.speakerId<< " " << meetingResult.sentence<<"\n";
 	}
 	of.close();
 	return 0;
